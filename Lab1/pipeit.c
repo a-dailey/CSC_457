@@ -68,7 +68,9 @@ int main(int argc, char **argv) {
         close(pipefd[1]); //close write side
         dup2(pipefd[0], STDIN); //replace stdin with pipe
             
-        int outfile = open("outfile", O_WRONLY | O_CREAT | O_TRUNC, 0644); //write only, create if DNE, clear if exists, set permissions for file(Owner: rw, Group: r, Other: r)
+        //write only, create if DNE, clear if exists, set permissions for file
+        //(Owner: rw, Group: r, Other: r)
+        int outfile = open("outfile", O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (outfile == -1) {
             printf("open failed\n");
             exit(EXIT_FAILURE);
@@ -94,6 +96,7 @@ int main(int argc, char **argv) {
         exit(EXIT_SUCCESS);
 
     }
+    
         
     
     
