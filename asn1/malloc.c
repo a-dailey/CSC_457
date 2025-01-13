@@ -49,7 +49,7 @@ void *malloc(size_t size) {
             // If there's enough space, split the block
             if (current->size >= aligned_size + BLOCK_SIZE + 16) {
                 Block *new_block = 
-                (Block *)((uintptr_t)current+BLOCK_SIZE+aligned_size);
+                (Block *)((uintptr_t)current + BLOCK_SIZE + aligned_size);
                 new_block->size = current->size - aligned_size - BLOCK_SIZE;
                 new_block->free = 1;
                 new_block->next = current->next;
@@ -63,7 +63,7 @@ void *malloc(size_t size) {
                 current->next = new_block;
             }
 
-            pp(stderr, "MALLOC: malloc(%zu) => (ptr=%p, size=%zu)\n", size, 
+            pp(stderr, "MALLOC: malloc(%d) => (ptr=%p, size=%d)\n", size, 
             (void *)((uintptr_t)current + BLOCK_SIZE), current->size);
             return (void *)((uintptr_t)current + BLOCK_SIZE);
         }
@@ -96,6 +96,17 @@ void *malloc(size_t size) {
 void free(void *ptr) {
     if (ptr == NULL) {
         return;
+    }
+
+    Block *current = head;
+
+
+    //handle pointers in the middle of a block
+    while (current) {
+        if ((uintptr_t) ptr >= (uintptr_t) current + BLOCK_SIZE && (uintptr_t) ptr < (uintptr_t) current + BLOCK_SIZE + current->size) {
+            //ptr is in this section, so free it
+            ptr = (void *)((uintptr_t) current + BLOCK_SIZE);
+        }
     }
 
     Block *block = (Block *)((uintptr_t)ptr - BLOCK_SIZE);
