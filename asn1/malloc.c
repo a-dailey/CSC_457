@@ -13,8 +13,10 @@ typedef struct Block {
     uint8_t free;
 } Block;
 
+
 /// DEFINES ///
 #define BLOCK_SIZE sizeof(Block)
+#define DEBUG_MALLOC getenv("DEBUG_MALLOC")
 
 /// GLOBALS ///
 static Block *head = NULL;
@@ -29,6 +31,12 @@ void *request_mem(size_t size);
 
 /// FUNCTIONS ///
 void *malloc(size_t size) {
+    if (DEBUG_MALLOC){
+        pp(stderr, "DEBUG MALLOC DEFINED\n");
+    }
+    else {
+        pp(stderr, "DEBUG MALLOC NOT DEFINED\n");
+    }
     size_t aligned_size = (size + 15) & ~15; // Align size to 16 bytes
 
     if (head == NULL) {
@@ -37,6 +45,11 @@ void *malloc(size_t size) {
         if (head == NULL) {
             return NULL;
         }
+
+        if (DEBUG_MALLOC){
+            pp(stderr, "Initialized heap\n");
+        }
+            
     }
 
     Block *current = head;
@@ -44,9 +57,9 @@ void *malloc(size_t size) {
 
     while (current) {
         if (current->free && current->size >= aligned_size) {
-            current->free = 0; // Mark block as allocated
+            current->free = 0; //Mark as allocated
 
-            // If there's enough space, split the block
+            //If there's enough space, split the block
             if (current->size >= aligned_size + BLOCK_SIZE + 16) {
                 Block *new_block = 
                 (Block *)((uintptr_t)current + BLOCK_SIZE + aligned_size);
@@ -63,8 +76,10 @@ void *malloc(size_t size) {
                 current->next = new_block;
             }
 
-            pp(stderr, "MALLOC: malloc(%d) => (ptr=%p, size=%d)\n", size, 
-            (void *)((uintptr_t)current + BLOCK_SIZE), current->size);
+            if (DEBUG_MALLOC){
+                pp(stderr, "MALLOC: malloc(%d) => (ptr=%p, size=%d)\n", size, 
+                (void *)((uintptr_t)current + BLOCK_SIZE), current->size);
+            }
             return (void *)((uintptr_t)current + BLOCK_SIZE);
         }
 
@@ -77,6 +92,7 @@ void *malloc(size_t size) {
     if (mem == NULL) {
         return NULL;
     }
+    //pp(stderr, "Got memory\n");
 
     Block *new_block = (Block *)mem;
     new_block->next = NULL;
@@ -100,13 +116,15 @@ void free(void *ptr) {
 
     Block *current = head;
 
-
     //handle pointers in the middle of a block
     while (current) {
-        if ((uintptr_t) ptr >= (uintptr_t) current + BLOCK_SIZE && (uintptr_t) ptr < (uintptr_t) current + BLOCK_SIZE + current->size) {
+        if ((uintptr_t) ptr >= (uintptr_t) current + BLOCK_SIZE && 
+        (uintptr_t) ptr < (uintptr_t) current + BLOCK_SIZE + current->size) {
             //ptr is in this section, so free it
             ptr = (void *)((uintptr_t) current + BLOCK_SIZE);
+            break;
         }
+        current = current->next;
     }
 
     Block *block = (Block *)((uintptr_t)ptr - BLOCK_SIZE);
@@ -130,7 +148,9 @@ void free(void *ptr) {
         }
     }
 
-    pp(stderr, "FREE: free(%p)\n", ptr);
+    if (DEBUG_MALLOC){
+        pp(stderr, "FREE: free(%p)\n", ptr);
+    }
 }
 
 void *calloc(size_t nmemb, size_t size) {
@@ -150,8 +170,11 @@ void *calloc(size_t nmemb, size_t size) {
     }
 
     memset(mem, 0, total_size);
-    pp(stderr, "CALLOC: calloc(%zu, %zu) => (ptr=%p, size=%zu)\n", 
-    nmemb, size, mem, total_size);
+
+    if (DEBUG_MALLOC){
+        pp(stderr, "CALLOC: calloc(%d, %d) => (ptr=%p, size=%d)\n", 
+        nmemb, size, mem, total_size);
+    }
     return mem;
 }
 
@@ -160,9 +183,43 @@ void *realloc(void *ptr, size_t size) {
         return malloc(size);
     }
 
+    Block *current = head;
+
+    //handle pointers in the middle of a block
+    while (current) {
+        if ((uintptr_t) ptr >= (uintptr_t) current + BLOCK_SIZE && 
+        (uintptr_t) ptr < (uintptr_t) current + BLOCK_SIZE + current->size) {
+            //ptr is in this section, so free it
+            ptr = (void *)((uintptr_t) current + BLOCK_SIZE);
+            break;
+        }
+        current = current->next;
+    }
+
     Block *block = (Block *)((uintptr_t)ptr - BLOCK_SIZE);
     if (block->size >= size) {
         return ptr;
+    }
+
+    if (block->next != NULL && block->next->free && 
+    block->size + block->next->size + BLOCK_SIZE >= size) {
+        //enough space in next block to expand
+        block->size += block->next->size + BLOCK_SIZE;
+        if (block->next->next != NULL) {
+            block->next->next->prev = block;
+        }
+        block->next = block->next->next;
+        
+        return ptr;
+    }
+
+    if (block->prev != NULL && block->prev->free && 
+    block->prev->size + block->size + BLOCK_SIZE >= size) {
+        //enough space in previous block to expand
+        block->prev->size += block->size + BLOCK_SIZE;
+        block->prev->next = block->next;
+        block->next->prev = block->prev;
+        return (void *)((uintptr_t)block->prev + BLOCK_SIZE);
     }
 
     void *new_ptr = malloc(size);
@@ -173,8 +230,10 @@ void *realloc(void *ptr, size_t size) {
     memcpy(new_ptr, ptr, block->size);
     free(ptr);
 
-    pp(stderr, "REALLOC: realloc(%p, %zu) => (ptr=%p, size=%zu)\n", 
-    ptr, size, new_ptr, size);
+    if (DEBUG_MALLOC){
+        pp(stderr, "REALLOC: realloc(%p, %d) => (ptr=%p, size=%d)\n", 
+        ptr, size, new_ptr, size);
+    }
     return new_ptr;
 }
 

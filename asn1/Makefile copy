@@ -8,7 +8,6 @@ LIBS = -lpp
 # Target names
 TARGET_STATIC = libmalloc.a
 TARGET_SHARED = libmalloc.so
-TEST_EXECUTABLE = test_malloc
 
 # Default target: builds both static and shared libraries
 all: $(TARGET_STATIC) $(TARGET_SHARED)
@@ -28,31 +27,15 @@ malloc.o: malloc.c
 # Create 32-bit and 64-bit versions of libmalloc.so
 intel-all: lib/libmalloc.so lib64/libmalloc.so
 
-lib/libmalloc.so: lib malloc32.o
-	$(CC) $(CFLAGS) -m32 -shared -o $@ malloc32.o
-
-lib64/libmalloc.so: lib64 malloc64.o
-	$(CC) $(CFLAGS) -shared -o $@ malloc64.o
-
-lib:
+lib/libmalloc.so: malloc.c
 	mkdir -p lib
+	$(CC) $(CFLAGS) -m32 -shared -o $@ malloc.c $(LIBPATH) $(LIBS)
 
-lib64:
+lib64/libmalloc.so: malloc.c
 	mkdir -p lib64
-
-malloc32.o: malloc.c
-	$(CC) $(CFLAGS) -m32 -c -o malloc32.o malloc.c
-
-malloc64.o: malloc.c
-	$(CC) $(CFLAGS) -m64 -c -o malloc64.o malloc.c
-
-# Test program
-test: $(TEST_EXECUTABLE)
-
-$(TEST_EXECUTABLE): test_malloc.c $(TARGET_STATIC)
-	$(CC) -o $@ test_malloc.c $(LIBPATH) -lmalloc $(LIBS)
+	$(CC) $(CFLAGS) -m64 -shared -o $@ malloc.c $(LIBPATH) $(LIBS)
 
 # Clean up build files
 clean:
-	rm -f *.o $(TARGET_STATIC) $(TARGET_SHARED) $(TEST_EXECUTABLE)
+	rm -f *.o $(TARGET_STATIC) $(TARGET_SHARED)
 	rm -rf lib lib64
