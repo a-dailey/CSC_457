@@ -1,9 +1,9 @@
 # Compiler and flags
 CC = gcc
 CFLAGS = -Wall -g -fpic
-INCLUDE = -I.
-LIBPATH = -L.
-LIBS = -lpp
+INCLUDE = -I ~pn-cs453/Given/Asgn1/include
+LIBPATH = -L ~pn-cs453/Given/Asgn1/lib64 -L ~/csc453/asn1
+LIBS = -lpp 
 
 # Target names
 TARGET_STATIC = libmalloc.a

@@ -5,7 +5,8 @@
 
 void test_malloc() {
     printf("Testing malloc...\n");
-    int *arr = (int *)malloc(10 * sizeof(int)); // Allocate memory for 10 integers
+    int *arr = (int *)malloc(10 * sizeof(int)); 
+    // Allocate memory for 10 integers
     if (!arr) {
         fprintf(stderr, "malloc failed!\n");
         return;
@@ -29,7 +30,8 @@ void test_malloc() {
 
 void test_calloc() {
     printf("Testing calloc...\n");
-    int *arr = (int *)calloc(10, sizeof(int)); // Allocate zero-initialized memory
+    int *arr = (int *)calloc(10, sizeof(int)); 
+    // Allocate zero-initialized memory
     if (!arr) {
         fprintf(stderr, "calloc failed!\n");
         return;
@@ -48,7 +50,8 @@ void test_calloc() {
 
 void test_realloc() {
     printf("Testing realloc...\n");
-    int *arr = (int *)malloc(5 * sizeof(int)); // Allocate memory for 5 integers
+    int *arr = (int *)malloc(5 * sizeof(int)); 
+    // Allocate memory for 5 integers
     if (!arr) {
         fprintf(stderr, "malloc failed!\n");
         return;

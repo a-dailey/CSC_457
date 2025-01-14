@@ -1,3 +1,6 @@
+/*Malloc library implementation for csc453 assignment 1*/
+
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -31,12 +34,12 @@ void *request_mem(size_t size);
 
 /// FUNCTIONS ///
 void *malloc(size_t size) {
-    if (DEBUG_MALLOC){
-        pp(stderr, "DEBUG MALLOC DEFINED\n");
-    }
-    else {
-        pp(stderr, "DEBUG MALLOC NOT DEFINED\n");
-    }
+    // if (DEBUG_MALLOC){
+    //     pp(stderr, "DEBUG MALLOC DEFINED\n");
+    // }
+    // else {
+    //     pp(stderr, "DEBUG MALLOC NOT DEFINED\n");
+    // }
     size_t aligned_size = (size + 15) & ~15; // Align size to 16 bytes
 
     if (head == NULL) {
@@ -149,7 +152,7 @@ void free(void *ptr) {
     }
 
     if (DEBUG_MALLOC){
-        pp(stderr, "FREE: free(%p)\n", ptr);
+        pp(stderr, "MALLOC: free(%p)\n", ptr);
     }
 }
 
@@ -172,7 +175,7 @@ void *calloc(size_t nmemb, size_t size) {
     memset(mem, 0, total_size);
 
     if (DEBUG_MALLOC){
-        pp(stderr, "CALLOC: calloc(%d, %d) => (ptr=%p, size=%d)\n", 
+        pp(stderr, "MALLOC: calloc(%d, %d) => (ptr=%p, size=%d)\n", 
         nmemb, size, mem, total_size);
     }
     return mem;
@@ -231,7 +234,7 @@ void *realloc(void *ptr, size_t size) {
     free(ptr);
 
     if (DEBUG_MALLOC){
-        pp(stderr, "REALLOC: realloc(%p, %d) => (ptr=%p, size=%d)\n", 
+        pp(stderr, "MALLOC: realloc(%p, %d) => (ptr=%p, size=%d)\n", 
         ptr, size, new_ptr, size);
     }
     return new_ptr;
