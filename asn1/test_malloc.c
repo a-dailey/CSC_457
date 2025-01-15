@@ -120,6 +120,12 @@ void test_stress() {
         free(blocks[i]);
     }
 
+    void *ptr = malloc(2^24); // Allocate a large block
+    if (!ptr) {
+        fprintf(stderr, "malloc failed for large block!\n");
+        return;
+    }
+
     printf("Stress test completed.\n\n");
 }
 

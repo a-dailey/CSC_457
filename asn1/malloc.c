@@ -109,6 +109,16 @@ void *malloc(size_t size) {
         head = new_block;
     }
 
+    if (prev && prev->free) {
+        // Merge with previous block if free
+        prev->size += new_block->size + BLOCK_SIZE;
+        prev->next = new_block->next;
+        if (new_block->next) {
+            new_block->next->prev = prev;
+        }
+        new_block = prev;
+    }
+
     return malloc(size); // Retry malloc with new memory added
 }
 
@@ -184,6 +194,11 @@ void *calloc(size_t nmemb, size_t size) {
 void *realloc(void *ptr, size_t size) {
     if (ptr == NULL) {
         return malloc(size);
+    }
+
+    if (size == 0) {
+        free(ptr);
+        return NULL;
     }
 
     Block *current = head;
