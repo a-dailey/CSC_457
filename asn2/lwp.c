@@ -94,9 +94,21 @@ tid_t lwp_create(lwpfun func, void *args) {
         fprintf(stderr, "Error: Scheduler %p does not have an admit function\n", current_scheduler);
         exit(1);
     }
+
+    unsigned long *stack_top = (unsigned long *) new_thread->stack + stack_size;
+
+    stack_top--;
+
+    *stack_top = (unsigned long) lwp_exit;
+    stack_top--;
+    *stack_top = (unsigned long) lwp_wrap;
+    stack_top--;
+    *stack_top = (unsigned long) 0;
+
+
     //initialize thread state
     //base pointer = 0
-    new_thread->state.rbp = 0;
+    new_thread->state.rbp = (unsigned long) (new_thread->stack + stack_size);
     //stack pointer to top of stack
     new_thread->state.rsp = (unsigned long) (new_thread->stack + stack_size);
     //
@@ -114,7 +126,7 @@ void  lwp_yield(void){
     return;
 }
 void  lwp_start(void){
-    if 
+    
 }
 tid_t lwp_wait(int *){
     return 0;
