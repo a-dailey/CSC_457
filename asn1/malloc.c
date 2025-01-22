@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <errno.h>
 #include "pp.h"
 
 /// STRUCTS ///
@@ -20,6 +21,8 @@ typedef struct Block {
 /// DEFINES ///
 #define BLOCK_SIZE sizeof(Block)
 #define DEBUG_MALLOC getenv("DEBUG_MALLOC")
+#define STD_CHUNK_SIZE 64 * 1024
+#define ALIGNMENT 16
 
 /// GLOBALS ///
 static Block *head = NULL;
@@ -29,17 +32,13 @@ void *malloc(size_t size);
 void free(void *ptr);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *ptr, size_t size);
+void align_heap();
 Block *init_heap();
 void *request_mem(size_t size);
 
 /// FUNCTIONS ///
 void *malloc(size_t size) {
-    // if (DEBUG_MALLOC){
-    //     pp(stderr, "DEBUG MALLOC DEFINED\n");
-    // }
-    // else {
-    //     pp(stderr, "DEBUG MALLOC NOT DEFINED\n");
-    // }
+   
     size_t aligned_size = (size + 15) & ~15; // Align size to 16 bytes
 
     if (head == NULL) {
@@ -55,6 +54,8 @@ void *malloc(size_t size) {
             
     }
 
+    align_heap(); // Align the heap to 16 bytes
+
     Block *current = head;
     Block *prev = NULL;
 
@@ -63,7 +64,7 @@ void *malloc(size_t size) {
             current->free = 0; //Mark as allocated
 
             //If there's enough space, split the block
-            if (current->size >= aligned_size + BLOCK_SIZE + 16) {
+            if (current->size >= aligned_size + BLOCK_SIZE + ALIGNMENT) {
                 Block *new_block = 
                 (Block *)((uintptr_t)current + BLOCK_SIZE + aligned_size);
                 new_block->size = current->size - aligned_size - BLOCK_SIZE;
@@ -91,7 +92,11 @@ void *malloc(size_t size) {
     }
 
     // No suitable block found, request more memory
-    void *mem = request_mem(64 * 1024);
+    size_t new_size = STD_CHUNK_SIZE;
+    if (aligned_size > new_size) {
+        new_size = aligned_size;
+    }
+    void *mem = request_mem(new_size);
     if (mem == NULL) {
         return NULL;
     }
@@ -100,7 +105,7 @@ void *malloc(size_t size) {
     Block *new_block = (Block *)mem;
     new_block->next = NULL;
     new_block->prev = prev;
-    new_block->size = 64 * 1024 - BLOCK_SIZE;
+    new_block->size = new_size - BLOCK_SIZE;
     new_block->free = 1;
 
     if (prev) {
@@ -122,6 +127,60 @@ void *malloc(size_t size) {
     return malloc(size); // Retry malloc with new memory added
 }
 
+void align_heap() {
+    //get current break
+    uintptr_t current_break = (uintptr_t) sbrk(0);
+    if (current_break == (uintptr_t)-1) {
+        errno = ENOMEM;
+        pp(stderr, "Failed to align memory, sbrk failed\n");
+        return;
+    }
+    if (current_break % ALIGNMENT != 0) {
+        //alignment is off, fix it
+        //calculate how much to align by
+        size_t align_size = ALIGNMENT - (current_break % ALIGNMENT);
+        //request memory for align block
+        void *align_block = sbrk(align_size);
+        if (align_block == (void *)-1) {
+            errno = ENOMEM;
+            pp(stderr, "Failed to align memory, sbrk failed\n");
+            return;
+        }
+
+        //add align block to end of blocks
+        if (head == NULL) {
+            //if no blocks yet, this align block is first
+            head = (Block *)align_block;
+            head->next = NULL;
+            head->prev = NULL;
+            head->size = align_size - BLOCK_SIZE;
+            head->free = 1;
+        } 
+        
+        else {
+            //if blocks exist, add align block to the end
+            Block *current = head;
+            //get to last block
+            while (current->next) {
+                current = current->next; 
+            }
+            //if last block is free, align block can be added to it
+            if (current->free) {
+                current->size += align_size;
+            } 
+            else {
+            //if last block is not free, add align block as new block
+            current->next = (Block *)align_block;
+            current->next->prev = current;
+            current->next->next = NULL;
+            current->next->size = align_size - BLOCK_SIZE;
+            current->next->free = 1;
+            }
+        }
+    }        
+    return;
+}
+
 void free(void *ptr) {
     if (ptr == NULL) {
         return;
@@ -140,6 +199,7 @@ void free(void *ptr) {
         current = current->next;
     }
 
+    // Find block to free
     Block *block = (Block *)((uintptr_t)ptr - BLOCK_SIZE);
     block->free = 1;
 
@@ -167,21 +227,24 @@ void free(void *ptr) {
 }
 
 void *calloc(size_t nmemb, size_t size) {
+    //check for invalid input
     if (nmemb == 0 || size == 0) {
         return NULL;
     }
 
-    // Prevent multiplication overflow
+    //stop multiplication overflow
     if (size != 0 && nmemb > SIZE_MAX / size) {
         return NULL;
     }
 
+    //allocate memory
     size_t total_size = nmemb * size;
     void *mem = malloc(total_size);
     if (mem == NULL) {
         return NULL;
     }
 
+    //zero out memory
     memset(mem, 0, total_size);
 
     if (DEBUG_MALLOC){
@@ -192,10 +255,12 @@ void *calloc(size_t nmemb, size_t size) {
 }
 
 void *realloc(void *ptr, size_t size) {
+    //if ptr is NULL, realloc is the same as malloc
     if (ptr == NULL) {
         return malloc(size);
     }
 
+    //if size is 0, realloc is the same as free
     if (size == 0) {
         free(ptr);
         return NULL;
@@ -204,21 +269,24 @@ void *realloc(void *ptr, size_t size) {
     Block *current = head;
 
     //handle pointers in the middle of a block
+    //iterate through all blocks, find block ptr is from, use start of block
     while (current) {
         if ((uintptr_t) ptr >= (uintptr_t) current + BLOCK_SIZE && 
         (uintptr_t) ptr < (uintptr_t) current + BLOCK_SIZE + current->size) {
-            //ptr is in this section, so free it
+            //ptr is in this section, so realloc this section
             ptr = (void *)((uintptr_t) current + BLOCK_SIZE);
             break;
         }
         current = current->next;
     }
 
+    //check if current block already has enough space
     Block *block = (Block *)((uintptr_t)ptr - BLOCK_SIZE);
     if (block->size >= size) {
         return ptr;
     }
 
+    //check if we can expand in place forwards
     if (block->next != NULL && block->next->free && 
     block->size + block->next->size + BLOCK_SIZE >= size) {
         //enough space in next block to expand
@@ -231,6 +299,7 @@ void *realloc(void *ptr, size_t size) {
         return ptr;
     }
 
+    //check if we can expand in place backwards
     if (block->prev != NULL && block->prev->free && 
     block->prev->size + block->size + BLOCK_SIZE >= size) {
         //enough space in previous block to expand
@@ -240,12 +309,15 @@ void *realloc(void *ptr, size_t size) {
         return (void *)((uintptr_t)block->prev + BLOCK_SIZE);
     }
 
+    //tried to extend in place, couldnt so just malloc
     void *new_ptr = malloc(size);
     if (new_ptr == NULL) {
         return NULL;
     }
 
+    //copy data from old pointer to new pointer
     memcpy(new_ptr, ptr, block->size);
+    //free old pointer
     free(ptr);
 
     if (DEBUG_MALLOC){
@@ -256,15 +328,35 @@ void *realloc(void *ptr, size_t size) {
 }
 
 Block *init_heap() {
-    void *mem = request_mem(64 * 1024);
+    //get current break
+    uintptr_t current_break = (uintptr_t) sbrk(0);
+    if (current_break == (uintptr_t)-1) {
+        errno = ENOMEM;
+        pp(stderr, "Failed to align memory, sbrk failed\n");
+        return NULL;
+    }
+    //check if heap is aligned
+    if (current_break % ALIGNMENT != 0) {
+        //not aligned, move break to next multiple of 16
+        void *temp = sbrk(ALIGNMENT - current_break % ALIGNMENT);
+        if (temp == (void *)-1) {
+            errno = ENOMEM;
+            pp(stderr, "Failed to align memory, sbrk failed\n");
+            return NULL;
+        }
+    }
+
+    //request memory for first block
+    void *mem = request_mem(STD_CHUNK_SIZE);
     if (mem == NULL) {
         return NULL;
     }
 
+    //put first block at start of heap
     Block *block = (Block *)mem;
     block->next = NULL;
     block->prev = NULL;
-    block->size = 64 * 1024 - BLOCK_SIZE;
+    block->size = STD_CHUNK_SIZE - BLOCK_SIZE;
     block->free = 1;
 
     return block;
@@ -273,6 +365,9 @@ Block *init_heap() {
 void *request_mem(size_t size) {
     void *mem = sbrk(size);
     if (mem == (void *)-1) {
+        //sbrk failed
+        errno = ENOMEM;
+        pp(stderr, "Failed to request memory, sbrk failed\n");
         return NULL;
     }
     return mem;
