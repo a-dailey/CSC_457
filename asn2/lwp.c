@@ -63,7 +63,7 @@ tid_t lwp_create(lwpfun func, void *args) {
     }
     new_thread->stack = stack;
     new_thread->stacksize = stack_size;
-    new_thread->status = LWP_LIVE;
+    new_thread->status = MKTERMSTAT(LWP_LIVE, 0);
     new_thread->exited = NULL;
     new_thread->lib_one = NULL;
     new_thread->lib_two = NULL;
@@ -71,25 +71,26 @@ tid_t lwp_create(lwpfun func, void *args) {
     new_thread->sched_two = NULL;
 
     //add to list
-    if (head == NULL) {
-        //first thread, make head
-        head = new_thread;
-        new_thread->lib_one = new_thread;
-        new_thread->lib_two = new_thread;
-    } else {
-        /*lib1 == prev thread, lib2 == next thread
-        inster new thread at end of the list, prev should be last thread, 
-        next should be head*/
+    // if (head == NULL) {
+    //     //first thread, make head
+    //     head = new_thread;
+    //     new_thread->lib_one = new_thread;
+    //     new_thread->lib_two = new_thread;
+    // } else {
+    //     /*lib1 == prev thread, lib2 == next thread
+    //     inster new thread at end of the list, prev should be last thread, 
+    //     next should be head*/
 
-        new_thread->lib_one = head->lib_one;
-        new_thread->lib_two = head;
-        head->lib_one->lib_two = new_thread;
-        head->lib_one = new_thread;
-    }
+    //     new_thread->lib_one = head->lib_one;
+    //     new_thread->lib_two = head;
+    //     head->lib_one->lib_two = new_thread;
+    //     head->lib_one = new_thread;
+    // }
     
     //add to scheduler
     if (current_scheduler != NULL && current_scheduler->admit != NULL) {
         current_scheduler->admit(new_thread);
+        add_thread(new_thread);
     } else {
         fprintf(stderr, "Error: Scheduler %p does not have an admit function\n", current_scheduler);
         exit(1);
@@ -107,12 +108,18 @@ tid_t lwp_create(lwpfun func, void *args) {
 
 
     //initialize thread state
-    //base pointer = 0
-    new_thread->state.rbp = (unsigned long) (new_thread->stack + stack_size);
-    //stack pointer to top of stack
-    new_thread->state.rsp = (unsigned long) (new_thread->stack + stack_size);
-    //
+    //put args in rsi reg
+    new_thread->state.rsi = (unsigned long) args;
+    //put function in rdi reg
+    new_thread->state.rdi = (unsigned long) func;
+    //base pointer to bottom of stack
+    new_thread->state.rbp = (unsigned long) stack_top;
+    //stack pointer to bottom of stack
+    new_thread->state.rsp = (unsigned long) stack_top;
+    //save floatinng pt state
     new_thread->state.fxsave = FPU_INIT;
+
+    //
     return new_thread->tid;
 }
 
@@ -160,4 +167,18 @@ thread tid2thread(tid_t tid){
         curr = curr->lib_two;
     }
     return NULL;
+}
+
+void add_thread(thread new) {
+    if (head == NULL) {
+        head = new;
+        new->sched_one = new;
+        new->sched_two = new;
+    } else {
+        new->sched_one = tail;
+        new->sched_two = head;
+        tail->sched_two = new;
+        head->sched_one = new;
+        tail = new;
+    }
 }
