@@ -11,6 +11,8 @@
 
 static scheduler current_scheduler = NULL;
 static thread head = NULL;
+static thread tail = NULL;
+thread current_thread = NULL;
 
 tid_t current_tid_cnt = 1;
 
@@ -130,10 +132,29 @@ tid_t lwp_gettid(void){
     return 0;
 }
 void  lwp_yield(void){
+    
     return;
 }
 void  lwp_start(void){
-    
+    thread main_thread = (thread)malloc(sizeof(context));
+    main_thread->tid = 0;
+    main_thread->stack = NULL;
+    main_thread->stacksize = 0;
+    main_thread->status = MKTERMSTAT(LWP_LIVE, 0);
+    main_thread->exited = NULL;
+    main_thread->lib_one = NULL;
+    main_thread->lib_two = NULL;
+    main_thread->sched_one = NULL;
+    main_thread->sched_two = NULL;
+
+    scheduler->admit(main_thread);
+
+    thread next = scheduler->next();
+    current_thread = next;
+
+    //set current context to next thread, save context of main thread
+    swap_rfiles(&(main_thread->state), &(next->state));
+    return;
 }
 tid_t lwp_wait(int *){
     return 0;
