@@ -12,6 +12,11 @@
 static scheduler current_scheduler = NULL;
 static thread head = NULL;
 static thread tail = NULL;
+
+static thread waiting_head = NULL;
+static thread waiting_tail = NULL;
+
+
 thread current_thread = NULL;
 
 tid_t current_tid_cnt = 1;
@@ -91,7 +96,9 @@ tid_t lwp_create(lwpfun func, void *args) {
     
     //add to scheduler
     if (current_scheduler != NULL && current_scheduler->admit != NULL) {
+        //add to scheduler
         current_scheduler->admit(new_thread);
+        //add to library list
         add_thread(new_thread);
     } else {
         fprintf(stderr, "Error: Scheduler %p does not have an admit function\n", current_scheduler);
@@ -126,12 +133,39 @@ tid_t lwp_create(lwpfun func, void *args) {
 }
 
 void  lwp_exit(int status){
-    return;
+    thread curr = current_thread;
+    //set status to terminated
+    curr->status = MKTERMSTAT(LWP_DEAD, status);
+    curr->exited = head;
+    //remove from scheduler
+    if (current_scheduler != NULL && current_scheduler->remove != NULL) {
+        current_scheduler->remove(curr);
+    } else {
+        fprintf(stderr, "Error: Scheduler %p does not have a remove function\n", current_scheduler);
+        exit(1);
+    }
+
+
+    lwp_yield();
+    
 }
 tid_t lwp_gettid(void){
     return 0;
 }
 void  lwp_yield(void){
+    thread next = scheduler->next();
+
+    thread prev = current_thread;
+
+    current_thread = next;
+
+    if (next == NULL) {
+        lwp_exit(current_thread->status);
+    }
+    //remove prev from scheduler
+    // scheduler->remove(prev);
+
+    swap_rfiles(&(prev->state), &(next->state));
     
     return;
 }
@@ -157,6 +191,8 @@ void  lwp_start(void){
     return;
 }
 tid_t lwp_wait(int *){
+    thread curr = current_thread;
+    
     return 0;
 }
 void  lwp_set_scheduler(scheduler fun){
@@ -181,7 +217,15 @@ scheduler lwp_get_scheduler(void){
 
 thread tid2thread(tid_t tid){
     thread curr = head;
-    while (curr != NULL) {
+    thread initial_head = head;
+    if (curr == NULL) {
+        return NULL;
+    }
+    if (curr->tid == tid) {
+        return curr;
+    }
+    curr = curr->lib_two;
+    while (curr != NULL && curr != initial_head) {
         if (curr->tid == tid) {
             return curr;
         }
@@ -201,5 +245,19 @@ void add_thread(thread new) {
         tail->sched_two = new;
         head->sched_one = new;
         tail = new;
+    }
+}
+
+void add_thread_waiting(thread new) {
+    if (waiting_head == NULL) {
+        waiting_head = new;
+        new->sched_one = new;
+        new->sched_two = new;
+    } else {
+        new->sched_one = waiting_tail;
+        new->sched_two = waiting_head;
+        waiting_tail->sched_two = new;
+        waiting_head->sched_one = new;
+        waiting_tail = new;
     }
 }
