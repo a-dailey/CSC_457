@@ -13,13 +13,19 @@ static scheduler current_scheduler = NULL;
 static thread head = NULL;
 static thread tail = NULL;
 
-static thread waiting_head = NULL;
-static thread waiting_tail = NULL;
+static waiting_thread waiting_head = NULL; 
+
+thread current_thread = NULL;
 
 
 thread current_thread = NULL;
 
 tid_t current_tid_cnt = 1;
+
+typedef struct waiting_thread {
+    thread thread;
+    struct waiting_thread *next;
+} waiting_thread;
 
 tid_t lwp_create(lwpfun func, void *args) {
     if (lwpfun == NULL) {
@@ -136,10 +142,14 @@ void  lwp_exit(int status){
     thread curr = current_thread;
     //set status to terminated
     curr->status = MKTERMSTAT(LWP_DEAD, status);
-    curr->exited = head;
+    curr->exited = waiting_head ;
     //remove from scheduler
     if (current_scheduler != NULL && current_scheduler->remove != NULL) {
         current_scheduler->remove(curr);
+        thread replacement = pop_thread_waiting();
+        if (replacement != NULL) {
+            current_scheduler->admit(replacement);
+        } 
     } else {
         fprintf(stderr, "Error: Scheduler %p does not have a remove function\n", current_scheduler);
         exit(1);
@@ -150,13 +160,16 @@ void  lwp_exit(int status){
     
 }
 tid_t lwp_gettid(void){
-    return 0;
+    if (current_thread == NULL) { 
+        return NO_THREAD;
+    }
+    return current_thread->tid;
 }
 void  lwp_yield(void){
     thread next = scheduler->next();
 
     thread prev = current_thread;
-
+  
     current_thread = next;
 
     if (next == NULL) {
@@ -181,9 +194,14 @@ void  lwp_start(void){
     main_thread->sched_one = NULL;
     main_thread->sched_two = NULL;
 
-    scheduler->admit(main_thread);
+    if (current_scheduler == NULL) {
+        fprintf(stderr, "Error: No scheduler set\n");
+        exit(1);
+    }
 
-    thread next = scheduler->next();
+    current_scheduler->admit(main_thread);
+    
+    thread next = current_scheduler->next();
     current_thread = next;
 
     //set current context to next thread, save context of main thread
@@ -192,6 +210,22 @@ void  lwp_start(void){
 }
 tid_t lwp_wait(int *){
     thread curr = current_thread;
+
+    //check if any threads can be continued, if not return NO_THREAD
+    if (current_scheduler->qlen() <= 1) {
+        return NO_THREAD;
+    }
+
+    //check if any threads terminated
+
+
+    //thread did terminate, deallocate and return
+
+    //thread did not terminate, put in waiting list and block current thread
+
+    current_scheduler->remove(curr);
+    add_thread_waiting(curr);
+
     
     return 0;
 }
@@ -237,27 +271,41 @@ thread tid2thread(tid_t tid){
 void add_thread(thread new) {
     if (head == NULL) {
         head = new;
-        new->sched_one = new;
-        new->sched_two = new;
+        new->lib_one = new; //prev
+        new->lib_two = new; //next
     } else {
-        new->sched_one = tail;
-        new->sched_two = head;
-        tail->sched_two = new;
-        head->sched_one = new;
+        new->lib_one = tail;
+        new->lib_two = head;
+        tail->lib_two = new;
+        head->lib_one = new;
         tail = new;
     }
 }
 
 void add_thread_waiting(thread new) {
     if (waiting_head == NULL) {
+        waiting_thread new_waiting_thread;
+        new_waiting_thread.thread = new;
+        new_waiting_thread.next = NULL;
         waiting_head = new;
-        new->sched_one = new;
-        new->sched_two = new;
+
     } else {
-        new->sched_one = waiting_tail;
-        new->sched_two = waiting_head;
-        waiting_tail->sched_two = new;
-        waiting_head->sched_one = new;
-        waiting_tail = new;
+        waiting_thread curr = waiting_head;
+        while (curr->next != NULL) {
+            curr = curr->next;
+        }
+        waiting_thread new_waiting_thread;
+        new_waiting_thread.thread = new;
+        new_waiting_thread.next = NULL;
+        curr->next = new_waiting_thread;
     }
+}
+
+thread pop_thread_waiting() {
+    if (waiting_head == NULL) {
+        return NULL;
+    }
+    thread oldest = waiting_head->thread;
+    waiting_head = waiting_head->next;
+    return oldest;  
 }
