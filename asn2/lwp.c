@@ -6,29 +6,28 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/resource.h>
+#include <errno.h>
+
+#define DEBUG_LWP getenv("DEBUG_LWP")
 
 #define STACK_SIZE 8 * 1024 * 1024
+#define ALIGNMENT_MASK 0xF
 
 static scheduler current_scheduler = NULL;
 static thread head = NULL;
 static thread tail = NULL;
+static thread current_thread = NULL;
 
-static waiting_thread waiting_head = NULL; 
-
-thread current_thread = NULL;
+static waiting_thread *waiting_head = NULL; 
 
 
-thread current_thread = NULL;
 
-tid_t current_tid_cnt = 1;
+static tid_t current_tid_cnt = 1;
 
-typedef struct waiting_thread {
-    thread thread;
-    struct waiting_thread *next;
-} waiting_thread;
 
 tid_t lwp_create(lwpfun func, void *args) {
-    if (lwpfun == NULL) {
+    if (func == NULL) {
         perror("Error: lwp_create() called with NULL function pointer\n");
         return NO_THREAD;
     }
@@ -38,16 +37,27 @@ tid_t lwp_create(lwpfun func, void *args) {
         perror("Error: lwp_create() failed to allocate thread\n");
         return NO_THREAD;
     }
+
+    if (current_scheduler == NULL) {
+        lwp_set_scheduler(RoundRobin);
+
+    }
     //give thread a tid
     new_thread->tid = current_tid_cnt;
-    current_tid_cnt++;
+    current_tid_cnt++; 
 
     //allocate space for stack
     size_t page_size = sysconf(_SC_PAGESIZE);
 
+    size_t stack_size = 0;
     struct rlimit rlim;
     size_t stack_resource_limit = getrlimit(RLIMIT_STACK, &rlim);
-    if (stack_resource_limit == NULL || stack_resource_limit == 0 || stack_resource_limit == RLIM_INIFITY) {
+    if (stack_resource_limit == -1) {
+        perror("Error: lwp_create() failed to get stack resource limit\n");
+        free(new_thread);
+        return NO_THREAD;
+    }
+    if (stack_resource_limit == 0 || stack_resource_limit == RLIM_INFINITY) {
         //no stack limit, use default
         stack_size = STACK_SIZE;
     } else {
@@ -56,10 +66,13 @@ tid_t lwp_create(lwpfun func, void *args) {
     }
     
     //alignh stack size to page size
-    size_t stack_size = ((stack_size + page_size - 1) / page_size) * page_size;
+    stack_size = ((stack_size + page_size - 1) / page_size) * page_size;
+    if (DEBUG_LWP) {
+        fprintf(stderr, "Thread: %lu stack size: %lu\n", new_thread->tid, stack_size);
+    }
 
     //allocate stack
-    unsigned long *stack = (unsigned long *) mmap(
+    void *stack = mmap(
         NULL, 
         stack_size, 
         PROT_READ | PROT_WRITE, 
@@ -74,7 +87,7 @@ tid_t lwp_create(lwpfun func, void *args) {
         free(new_thread);
         return NO_THREAD;
     }
-    new_thread->stack = stack;
+    new_thread->stack = (unsigned long *) stack;
     new_thread->stacksize = stack_size;
     new_thread->status = MKTERMSTAT(LWP_LIVE, 0);
     new_thread->exited = NULL;
@@ -83,38 +96,12 @@ tid_t lwp_create(lwpfun func, void *args) {
     new_thread->sched_one = NULL;
     new_thread->sched_two = NULL;
 
-    //add to list
-    // if (head == NULL) {
-    //     //first thread, make head
-    //     head = new_thread;
-    //     new_thread->lib_one = new_thread;
-    //     new_thread->lib_two = new_thread;
-    // } else {
-    //     /*lib1 == prev thread, lib2 == next thread
-    //     inster new thread at end of the list, prev should be last thread, 
-    //     next should be head*/
 
-    //     new_thread->lib_one = head->lib_one;
-    //     new_thread->lib_two = head;
-    //     head->lib_one->lib_two = new_thread;
-    //     head->lib_one = new_thread;
-    // }
-    
-    //add to scheduler
-    if (current_scheduler != NULL && current_scheduler->admit != NULL) {
-        //add to scheduler
-        current_scheduler->admit(new_thread);
-        //add to library list
-        add_thread(new_thread);
-    } else {
-        fprintf(stderr, "Error: Scheduler %p does not have an admit function\n", current_scheduler);
-        exit(1);
-    }
 
-    unsigned long *stack_top = (unsigned long *) new_thread->stack + stack_size;
+    unsigned long *stack_top = (unsigned long *) ((unsigned long) stack + stack_size);
 
+    stack_top = (unsigned long *) ((unsigned long) stack_top & ~ALIGNMENT_MASK);
     stack_top--;
-
     *stack_top = (unsigned long) lwp_exit;
     stack_top--;
     *stack_top = (unsigned long) lwp_wrap;
@@ -134,27 +121,42 @@ tid_t lwp_create(lwpfun func, void *args) {
     //save floatinng pt state
     new_thread->state.fxsave = FPU_INIT;
 
-    //
-    return new_thread->tid;
+    //add to scheduler
+    if (current_scheduler != NULL && current_scheduler->admit != NULL) {
+        //add to scheduler
+        current_scheduler->admit(new_thread);
+        //add to library list
+        add_thread(new_thread);
+    } else {
+        fprintf(stderr, "Error: Scheduler %p does not have an admit function\n", current_scheduler);
+        exit(1);
+    }
+
+    return new_thread->tid; 
 }
 
 void  lwp_exit(int status){
-    thread curr = current_thread;
+    if (DEBUG_LWP) {
+        fprintf(stderr, "Thread %lu exited with status %d\n", current_thread->tid, status);
+    }
+    thread curr = current_thread; 
     //set status to terminated
-    curr->status = MKTERMSTAT(LWP_DEAD, status);
-    curr->exited = waiting_head ;
+    curr->status = MKTERMSTAT(LWP_TERM, status);
+    if (DEBUG_LWP) {
+        fprintf(stderr, "Thread %lu status: %d\n", curr->tid, curr->status);
+    }
     //remove from scheduler
     if (current_scheduler != NULL && current_scheduler->remove != NULL) {
         current_scheduler->remove(curr);
         thread replacement = pop_thread_waiting();
         if (replacement != NULL) {
+            replacement->exited = curr;
             current_scheduler->admit(replacement);
         } 
     } else {
         fprintf(stderr, "Error: Scheduler %p does not have a remove function\n", current_scheduler);
         exit(1);
     }
-
 
     lwp_yield();
     
@@ -166,15 +168,16 @@ tid_t lwp_gettid(void){
     return current_thread->tid;
 }
 void  lwp_yield(void){
-    thread next = scheduler->next();
+    thread next = current_scheduler->next();
 
     thread prev = current_thread;
-  
-    current_thread = next;
 
     if (next == NULL) {
-        lwp_exit(current_thread->status);
+       exit(LWPTERMSTAT(prev->status));
     }
+
+    current_thread = next;
+
     //remove prev from scheduler
     // scheduler->remove(prev);
 
@@ -208,7 +211,7 @@ void  lwp_start(void){
     swap_rfiles(&(main_thread->state), &(next->state));
     return;
 }
-tid_t lwp_wait(int *){
+tid_t lwp_wait(int *status){
     thread curr = current_thread;
 
     //check if any threads can be continued, if not return NO_THREAD
@@ -217,16 +220,55 @@ tid_t lwp_wait(int *){
     }
 
     //check if any threads terminated
+    thread og_head = curr;
+    while (curr != NULL && curr != og_head) {
+        if (LWPTERMINATED(curr->status)) {
+            if (status != NULL){
+                *status = LWP_TERM;
+            }
+            //thread terminated, deallocate and return
+            //first connect lib_one and lib_two
+            if (curr == head) {
+                head = curr->lib_two;
+            }
+            if (curr == tail) {
+                tail = curr->lib_one;
+            }
+            if (curr->lib_one != NULL) {
+                curr->lib_one->lib_two = curr->lib_two;
+            }
+            if (curr->lib_two != NULL) {
+                curr->lib_two->lib_one = curr->lib_one;
+            }
+            munmap(curr->stack, curr->stacksize);
+            free(curr);
+            return curr->tid;
+        }
+        curr = curr->lib_two;
+    }
+    if (status != NULL) {
+        *status = LWP_LIVE;
+    }
+    //no threads terminated, put in waiting list and block current thread
+    current_scheduler->remove(current_thread);
+    add_thread_waiting(current_thread);
 
+    //block+
+    lwp_yield();
 
-    //thread did terminate, deallocate and return
+    //deallocate terminated thread once returned
+    if (current_thread->exited != NULL) {
+        thread terminated = current_thread->exited;
+        remove_thread(terminated);
+        if (terminated->stack != NULL){
+            munmap(terminated->stack, terminated->stacksize);
+        }
+        
+        tid_t tid = terminated->tid;
+        free(terminated); 
+        return tid;
+    }
 
-    //thread did not terminate, put in waiting list and block current thread
-
-    current_scheduler->remove(curr);
-    add_thread_waiting(curr);
-
-    
     return 0;
 }
 void  lwp_set_scheduler(scheduler fun){
@@ -237,7 +279,7 @@ void  lwp_set_scheduler(scheduler fun){
     //set new scheduler
     current_scheduler = fun;
     //initialize new scheduler
-    if (current_scheduler != NULL and new_scheduler->init != NULL) {
+    if (current_scheduler != NULL && current_scheduler->init != NULL) {
         current_scheduler->init();
         return;
     } 
@@ -246,7 +288,7 @@ void  lwp_set_scheduler(scheduler fun){
 }
 
 scheduler lwp_get_scheduler(void){
-    return current_scheduler
+    return current_scheduler;
 }
 
 thread tid2thread(tid_t tid){
@@ -268,12 +310,20 @@ thread tid2thread(tid_t tid){
     return NULL;
 }
 
+void lwp_wrap(lwpfun fun, void *args){
+    int ret = fun(args);
+    lwp_exit(ret);
+}
+
 void add_thread(thread new) {
     if (head == NULL) {
         head = new;
         new->lib_one = new; //prev
         new->lib_two = new; //next
+        tail = new;
+
     } else {
+        //new thread is now tail 
         new->lib_one = tail;
         new->lib_two = head;
         tail->lib_two = new;
@@ -283,29 +333,60 @@ void add_thread(thread new) {
 }
 
 void add_thread_waiting(thread new) {
-    if (waiting_head == NULL) {
-        waiting_thread new_waiting_thread;
-        new_waiting_thread.thread = new;
-        new_waiting_thread.next = NULL;
-        waiting_head = new;
+    waiting_thread *new_waiting_thread = (waiting_thread *)malloc(sizeof(waiting_thread));
+    if (new_waiting_thread == NULL) {
+        perror("Error: add_thread_waiting() failed to allocate new_waiting_thread\n");
+        return;
+    }
+    new_waiting_thread->thread = new;
+    new_waiting_thread->next = NULL;
 
+    if (waiting_head == NULL) {
+        waiting_head = new_waiting_thread;
     } else {
-        waiting_thread curr = waiting_head;
+        waiting_thread *curr = waiting_head;
         while (curr->next != NULL) {
             curr = curr->next;
         }
-        waiting_thread new_waiting_thread;
-        new_waiting_thread.thread = new;
-        new_waiting_thread.next = NULL;
         curr->next = new_waiting_thread;
     }
 }
 
-thread pop_thread_waiting() {
+thread pop_thread_waiting(void) {
     if (waiting_head == NULL) {
         return NULL;
     }
-    thread oldest = waiting_head->thread;
+    waiting_thread *oldest = waiting_head;
+    thread oldest_thread = oldest->thread;
     waiting_head = waiting_head->next;
-    return oldest;  
+    free(oldest);
+    return oldest_thread;  
+}
+void remove_thread(thread victim) {
+    if (head == NULL) {
+        return;
+    }
+    if (victim == head && victim == tail) {
+        head = NULL;
+        tail = NULL;
+        return;
+    } else {
+        thread prev = victim->lib_one;
+        thread next = victim->lib_two;
+
+        if (prev != NULL) {
+            prev->lib_two = next;
+        }
+        if (next != NULL) {
+            next->lib_one = prev;
+        }
+
+        if (victim == head) {
+            head = next;
+        }
+        if (victim == tail) {
+            tail = prev;
+        }
+        return;
+    }
 }

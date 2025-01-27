@@ -65,6 +65,11 @@ typedef struct scheduler {
   int    (*qlen)(void);            /* number of ready threads       */
 } *scheduler;
 
+typedef struct waiting_thread {
+    thread thread;
+    struct waiting_thread *next;
+} waiting_thread;
+
 /* lwp functions */
 extern tid_t lwp_create(lwpfun,void *);
 extern void  lwp_exit(int status);
@@ -75,6 +80,11 @@ extern tid_t lwp_wait(int *);
 extern void  lwp_set_scheduler(scheduler fun);
 extern scheduler lwp_get_scheduler(void);
 extern thread tid2thread(tid_t tid);
+extern void add_thread(thread new);
+extern void add_thread_waiting(thread new);
+extern void remove_thread(thread victim);
+extern thread pop_thread_waiting(void);
+extern void lwp_wrap(lwpfun fun, void *args);  
 
 /* for lwp_wait */
 #define TERMOFFSET        8
