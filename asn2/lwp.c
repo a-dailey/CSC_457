@@ -258,7 +258,7 @@ tid_t lwp_wait(int *status){
 
     //deallocate terminated thread once returned
     if (current_thread->exited != NULL) {
-        thread terminated = current_thread->exited;
+        thread terminated = current_threadtidexited;
         remove_thread(terminated);
         if (terminated->stack != NULL){
             munmap(terminated->stack, terminated->stacksize);
