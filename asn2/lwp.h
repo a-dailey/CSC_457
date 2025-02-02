@@ -70,6 +70,11 @@ typedef struct waiting_thread {
     struct waiting_thread *next;
 } waiting_thread;
 
+typedef struct terminated_thread {
+    thread thread;
+    struct terminated_thread *next;
+} terminated_thread;
+
 /* lwp functions */
 extern tid_t lwp_create(lwpfun,void *);
 extern void  lwp_exit(int status);
@@ -82,6 +87,8 @@ extern scheduler lwp_get_scheduler(void);
 extern thread tid2thread(tid_t tid);
 extern void add_thread(thread new);
 extern void add_thread_waiting(thread new);
+extern void add_thread_terminated(thread new);
+extern thread pop_thread_terminated(void);
 extern void remove_thread(thread victim);
 extern thread pop_thread_waiting(void);
 extern void lwp_wrap(lwpfun fun, void *args);  

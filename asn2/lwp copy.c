@@ -23,6 +23,8 @@ static waiting_thread *waiting_head = NULL;
 
 static terminated_thread *terminated_head = NULL;
 
+
+
 static tid_t current_tid_cnt = 2;
 
 
@@ -40,17 +42,17 @@ tid_t lwp_create(lwpfun func, void *args) {
 
     if (current_scheduler == NULL) {
         lwp_set_scheduler(RoundRobin);
+
     }
     //give thread a tid
     new_thread->tid = current_tid_cnt;
     current_tid_cnt++; 
 
-    //get page size
+    //allocate space for stack
     size_t page_size = sysconf(_SC_PAGESIZE);
 
     size_t stack_size = 0;
     struct rlimit rlim;
-    //get stack resource limit
     size_t stack_resource_limit = getrlimit(RLIMIT_STACK, &rlim);
     if (stack_resource_limit == -1) {
         perror("Error: lwp_create() failed to get stack resource limit\n");
@@ -74,10 +76,6 @@ tid_t lwp_create(lwpfun func, void *args) {
     // }
 
     //allocate stack
-    //READ and WRITE permissions
-    //private mapping
-    //anonymous mapping
-    //stack mapping
     void *stack = mmap(
         NULL, 
         stack_size, 
@@ -93,7 +91,6 @@ tid_t lwp_create(lwpfun func, void *args) {
         free(new_thread);
         return NO_THREAD;
     }
-    //initialize thread to LIVE
     new_thread->stack = (unsigned long *) stack;
     new_thread->stacksize = stack_size;
     new_thread->status = MKTERMSTAT(LWP_LIVE, 0);
@@ -104,14 +101,12 @@ tid_t lwp_create(lwpfun func, void *args) {
     new_thread->sched_two = NULL;
 
 
-    //set pointer to end of stack
+
     unsigned long *stack_top = 
     (unsigned long *) ((unsigned long) stack + stack_size);
 
-    //align stack to 16 bytes
     stack_top = (unsigned long *) 
     ((unsigned long) stack_top & ~ALIGNMENT_MASK);
-    //push return address, lwp_exit, and lwp_wrap onto stack
     stack_top--;
     *stack_top = (unsigned long) lwp_exit;
     stack_top--;
@@ -164,16 +159,16 @@ void lwp_exit(int status) {
     }
     thread curr = current_thread; 
     
-    //store termination status
+    // Make sure we properly store the termination status
     curr->status = MKTERMSTAT(LWP_TERM, status & ((1 << TERMOFFSET) - 1));
     
     if (current_scheduler != NULL && current_scheduler->remove != NULL) {
         current_scheduler->remove(curr);
         
-        //Get waiting thread if any
+        // Get waiting thread if any
         thread waiting = pop_thread_waiting();
         if (waiting != NULL) {
-            waiting->exited = curr;  //Link terminated thread
+            waiting->exited = curr;  // Link the terminated thread
             current_scheduler->admit(waiting);
         }
     }
@@ -188,8 +183,6 @@ tid_t lwp_gettid(void){
     }
     return current_thread->tid;
 }
-
-
 void lwp_yield(void){
     thread next = current_scheduler->next();
 
@@ -220,7 +213,6 @@ void lwp_yield(void){
         return;
     }
 
-    //set current thread to next thread
     thread prev = current_thread;
     current_thread = next;
     swap_rfiles(&(prev->state), &(next->state));
@@ -251,8 +243,7 @@ void  lwp_start(void){
     //set current context to next thread, 
     //save context of main thread
     swap_rfiles(&(main_thread->state), &(next->state));
-
-    //while (lwp_wait(NULL) != NO_THREAD);
+    return;
 }
 
 
@@ -289,12 +280,12 @@ tid_t lwp_wait(int *status) {
     
     lwp_yield();
 
-    //Free terminated thread after unblocking
+    // Handle terminated thread after unblocking
     if (current_thread->exited != NULL) {
         thread terminated = current_thread->exited;
         tid_t tid = terminated->tid;
         
-        //Populate status
+        // Make sure we get the correct status
         if (status != NULL) {
             *status = LWPTERMSTAT(terminated->status);
         }
@@ -313,10 +304,6 @@ tid_t lwp_wait(int *status) {
 
 
 void  lwp_set_scheduler(scheduler fun){
-
-    if (DEBUG_LWP && fun != RoundRobin) {
-        printf("Not RoundRobin\n");
-    }
     //shutdown other schedule if it exists
     scheduler new_scheduler = fun;
     if (current_scheduler == new_scheduler) {
@@ -395,14 +382,12 @@ void lwp_wrap(lwpfun fun, void *args){
 }
 
 void add_thread(thread new) {
-    //if no threads in list
     if (head == NULL) {
         head = new;
         new->lib_one = new; //prev
         new->lib_two = new; //next
         tail = new;
 
-    //more than one thread in list
     } else {
         //new thread is now tail 
         new->lib_one = tail;
@@ -414,7 +399,6 @@ void add_thread(thread new) {
 }
 
 void add_thread_waiting(thread new) {
-    //allocate space for new waiting thread
     waiting_thread *new_waiting_thread = 
     (waiting_thread *)malloc(sizeof(waiting_thread));
     if (new_waiting_thread == NULL) {
@@ -424,7 +408,6 @@ void add_thread_waiting(thread new) {
     new_waiting_thread->thread = new;
     new_waiting_thread->next = NULL;
 
-    //add to end of list
     if (waiting_head == NULL) {
         waiting_head = new_waiting_thread;
     } else {
@@ -438,11 +421,9 @@ void add_thread_waiting(thread new) {
 
 
 thread pop_thread_waiting(void) {
-    //if no waiting threads
     if (waiting_head == NULL) {
         return NULL;
     }
-    //get oldest waiting thread
     waiting_thread *oldest = waiting_head;
     thread oldest_thread = oldest->thread;
     waiting_head = waiting_head->next;
@@ -451,7 +432,6 @@ thread pop_thread_waiting(void) {
 }
 
 void add_thread_terminated(thread new) {
-    //allocate space for new terminated thread
     terminated_thread *new_terminated_thread = 
     (terminated_thread *)malloc(sizeof(terminated_thread));
     if (new_terminated_thread == NULL) {
@@ -461,7 +441,6 @@ void add_thread_terminated(thread new) {
     new_terminated_thread->thread = new;
     new_terminated_thread->next = NULL;
 
-    //add to end of list
     if (terminated_head == NULL) {
         terminated_head = new_terminated_thread;
     } else {
@@ -485,18 +464,14 @@ thread pop_thread_terminated(void) {
 }
 
 void remove_thread(thread victim) {
-    //if no threads in list
     if (head == NULL) {
         return;
     }
-    //if only one thread in list
     if (victim == head && victim == tail) {
         head = NULL;
         tail = NULL;
         return;
-    } 
-    //more than one thread in list
-    else {
+    } else {
         thread prev = victim->lib_one;
         thread next = victim->lib_two;
 

@@ -15,15 +15,12 @@ void rr_shutdown(void) {
 }
 
 void rr_admit(thread new) {
-    //strart of list
     if (head == NULL) {
         head = new;
         tail = new;
         new->sched_one = new;
         new->sched_two = new;
-    } 
-    //add to end of list
-    else {
+    } else {
         new->sched_one = tail;
         new->sched_two = head;
         tail->sched_two = new;
@@ -35,14 +32,12 @@ void rr_admit(thread new) {
 void rr_remove(thread victim) {
     if (head == NULL) return;
 
-    //if only one thread in list
+
     if (victim == head && victim == tail) {
         //head and tail are same, only one thread in the list
         head = NULL;
         tail = NULL;
-    } 
-    //more than one thread in list
-    else {
+    } else {
         //remove victim from list
         thread prev = victim->sched_one;
         thread next = victim->sched_two;
@@ -72,10 +67,9 @@ thread rr_next(void) {
 int rr_qlen(void) {
     if (head == NULL) return 0;
 
-    int count = 1;
-    thread curr = head->sched_two;
-    //count nodes
-    while (curr != head) {
+    int count = 0;
+    thread curr = head;
+    while (curr != tail) {
         count++;
         curr = curr->sched_two;
     }

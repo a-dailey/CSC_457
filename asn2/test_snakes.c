@@ -28,9 +28,12 @@ int main() {
     lwp_set_scheduler(RoundRobin);
 
     // Create snakes
-    snake s1 = new_snake(5, 10, 5, E, 1);  // Snake at (5,10), length 5, direction E, color 1
-    snake s2 = new_snake(10, 15, 7, W, 2); // Snake at (10,15), length 7, direction W, color 2
-    snake s3 = new_snake(15, 20, 10, N, 3); // Snake at (15,20), length 10, direction N, color 3
+    snake s1 = new_snake(5, 10, 5, E, 1);  
+    // Snake at (5,10), length 5, direction E, color 1
+    snake s2 = new_snake(10, 15, 7, W, 2); 
+    // Snake at (10,15), length 7, direction W, color 2
+    snake s3 = new_snake(15, 20, 10, N, 3); 
+    // Snake at (15,20), length 10, direction N, color 3
 
     // Create threads for snakes
     lwp_create(snake_thread, &s1);
