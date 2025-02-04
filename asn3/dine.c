@@ -12,8 +12,11 @@
 #include <limits.h>
 #include "dine.h"
 
+
 #define SHARED_SEM 1
 #define SEM_START_VAL 1
+
+#define CHANGE_STR "       "
 
 #define DEFAULT_CYCLES 10  
 
@@ -23,7 +26,10 @@ static sem_t forks[NUM_PHILOSOPHERS];
 
 static sem_t print_status_lock;
 
-philosopher philosophers[NUM_PHILOSOPHERS];
+
+static sem_t update_phil_lock;
+
+philosopher *philosophers[NUM_PHILOSOPHERS];
 
 int main(int argc, char *argv[]) {
     if (argc > 2) {
@@ -41,14 +47,22 @@ int main(int argc, char *argv[]) {
     //initialize philosopher data
     int i;
     for (i = 0; i < NUM_PHILOSOPHERS; i++) {
-        philosophers[i]->thread = NULL;
-        philosophers[i]->state = "";
+        philosophers[i] = malloc(sizeof(philosopher));
+        if (philosophers[i] == NULL) {
+            perror("Error: malloc() failed\n");
+            return 1;
+        }
+        //philosophers[i]->thread = NULL;
+        philosophers[i]->state = CHANGE_STR;
+        memset(philosophers[i]->fork_representation, '-', NUM_PHILOSOPHERS);
+        philosophers[i]->fork_representation[NUM_PHILOSOPHERS] = '\0';
         philosophers[i]->left_fork = 0;
         philosophers[i]->right_fork = 0;
     }
 
 
     //initialize semaphores
+    sem_init(&update_phil_lock, SHARED_SEM, SEM_START_VAL);
     sem_init(&print_status_lock, SHARED_SEM, SEM_START_VAL);
     for (i = 0; i < NUM_PHILOSOPHERS; i++) {
         if (sem_init(&forks[i], SHARED_SEM, SEM_START_VAL) == -1) {
@@ -57,10 +71,19 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    //print header
+    print_header();
+
     //create threads
     for (i = 0; i < NUM_PHILOSOPHERS; i++) {
-        philosopher_ids[i] = i;  // Store philosopher index safely
-        if (pthread_create(&philosophers[i].thread, NULL, dine, (void *)i) != 0) {
+        //philosophers[i] = i;  // Store philosopher index safely
+        int *arg = malloc(sizeof(int));  // Allocate memory for the argument
+        if (arg == NULL) {
+            perror("Error: malloc() failed");
+            return 1;
+        }
+        *arg = i;  // Assign the philosopher index to the allocated memory
+        if (pthread_create(&philosophers[i]->thread, NULL, dine, arg) != 0) {
             perror("Error: pthread_create() failed");
             return 1;
         }
@@ -68,11 +91,31 @@ int main(int argc, char *argv[]) {
 
     //join threads
     for (i = 0; i < NUM_PHILOSOPHERS; i++) {
-        if (pthread_join(philosophers[i].thread, NULL) != 0) {
+        if (pthread_join(philosophers[i]->thread, NULL) != 0) {
             perror("Error: pthread_join() failed");
             return 1;
         }
     }
+    //destroy semaphores
+    if (sem_destroy(&update_phil_lock) == -1) {
+        perror("Error: sem_destroy() failed");
+        return 1;
+    }
+    if (sem_destroy(&print_status_lock) == -1) {
+        perror("Error: sem_destroy() failed");
+        return 1;
+    }
+    for (i = 0; i < NUM_PHILOSOPHERS; i++) {
+        if (sem_destroy(&forks[i]) == -1) {
+            perror("Error: sem_destroy() failed");
+            return 1;
+        }
+    } 
+    //free memory
+    for (i = 0; i < NUM_PHILOSOPHERS; i++) {
+        free(philosophers[i]);
+    }
+    return 0;
     
 }
 
@@ -80,13 +123,14 @@ int main(int argc, char *argv[]) {
 void *dine(void *arg) {
 
     //philosopher number
-    int philosopher_num = (int)arg;
+    int philosopher_num = *(int *)arg;
+    free(arg);  // Free the allocated memory for the argument
 
-    philosopher *philosopher = philosophers[philosopher_num];
+    //philosopher *philosopher = philosophers[philosopher_num];
 
     //left and right forks
-    int left_fork = philosopher;
-    int right_fork = (philosopher + 1) % NUM_PHILOSOPHERS;
+    int left_fork = philosopher_num;
+    int right_fork = (philosopher_num + 1) % NUM_PHILOSOPHERS;
 
     //fork representations
 
@@ -94,91 +138,172 @@ void *dine(void *arg) {
     //eat-think cycles
     int i;  
     for (i = 0; i < cycles; i++) {
-        //think
+        //deciding to try and eat
+        update_philosopher(philosopher_num, CHANGE_STR, 0, 0);
         if (philosopher_num % 2 == 0) {
             //even philosophers pick up right fork first
             sem_wait(&forks[right_fork]);
-            philosopher->right_fork = 1;
-            update_fork_representation(philosopher_num);
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, CHANGE_STR, 0, 1);
+            //update_fork_representation(philosopher_num);
+            //print_status();
             sem_wait(&forks[left_fork]);
-            philosopher->left_fork = 1;
-            update_fork_representation(philosopher_num);
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, CHANGE_STR, 1, 1);
+            //update_fork_representation(philosopher_num);
+            //print_status();
             //has both forks, is eating
-            philosopher->state = "Eat  ";
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, "Eat    ", 1, 1);
+            //print_status();
             dawdle();
             //put down forks
+            update_philosopher(philosopher_num, CHANGE_STR, 1, 1);
             sem_post(&forks[right_fork]);
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, CHANGE_STR, 0, 1);
+            //print_status();  
+            sem_post(&forks[left_fork]);
+            update_philosopher(philosopher_num, CHANGE_STR, 0, 0);
+            //print_status();
+            update_philosopher(philosopher_num, "Think  ", 0, 0);
+            dawdle();
             
 
         }
         else {
+            
             //odd philosophers pick up left fork first
             sem_wait(&forks[left_fork]);
-            philosopher->left_fork = 1;
-            update_fork_representation(philosopher_num);
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, CHANGE_STR, 1, 0);
+            //update_fork_representation(philosopher_num);
+            //print_status();
             sem_wait(&forks[right_fork]);
-            philosopher->right_fork = 1;
-            update_fork_representation(philosopher_num);
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, CHANGE_STR, 1, 1);
+           // update_fork_representation(philosopher_num);
+            //print_status();
             //has both forks, is eating
-            philosopher->state = "Eat  ";
-            print_status(philosopher_num);
+            update_philosopher(philosopher_num, "Eat    ", 1, 1);
+            //print_status();
             dawdle();
+            update_philosopher(philosopher_num, CHANGE_STR, 1, 1);
             //put down forks
             sem_post(&forks[left_fork]);
-            print_status(philosopher_num);
-
+            update_philosopher(philosopher_num, CHANGE_STR, 0, 1);
+            //print_status();
+            sem_post(&forks[right_fork]);
+            update_philosopher(philosopher_num, CHANGE_STR, 0, 0);
+            //print_status();
+            update_philosopher(philosopher_num, "Think  ", 0, 0);
+            //print_status();
+            dawdle();
         }
     }
-
+    return NULL;
 }
 
-void print_status(int philosopher) {
+void update_philosopher(int philosopher_num, 
+char *state, int left_fork, int right_fork) {
+    sem_wait(&update_phil_lock);
+
+    // When picking up the left fork (fork i),
+    // clear the adjacent philosopher’s right fork.
+    if (left_fork == 1) {
+        int leftNeighbor = (philosopher_num + NUM_PHILOSOPHERS - 1) 
+        % NUM_PHILOSOPHERS;
+        philosophers[leftNeighbor]->right_fork = 0;
+        philosophers[leftNeighbor]->state = CHANGE_STR;
+    }
+
+    // When picking up the right fork (fork (i+1)), 
+    //clear the adjacent philosopher’s left fork.
+    if (right_fork == 1) {
+        int rightNeighbor = (philosopher_num + 1) % NUM_PHILOSOPHERS;
+        philosophers[rightNeighbor]->left_fork = 0;
+        philosophers[rightNeighbor]->state = CHANGE_STR;
+    }
+
+    // Now update this philosopher's state and fork flags.
+    philosophers[philosopher_num]->state = state;
+    philosophers[philosopher_num]->left_fork = left_fork;
+    philosophers[philosopher_num]->right_fork = right_fork;
+
+    print_status();
+    sem_post(&update_phil_lock);
+}
+
+void print_status(int calling_philosopher) {
     sem_wait(&print_status_lock);
+    for ( int i = 0; i < NUM_PHILOSOPHERS; i++) {
+        update_fork_representation(i);
+    }
     int i;
     for (i=0; i < NUM_PHILOSOPHERS; i++) {
-        printf("| %s %s ", philosophers[i]->fork_representation, philosophers[i]->state);
+        printf("| %s %s ", philosophers[i]->fork_representation, 
+        philosophers[i]->state);
     }
+    printf("| Called by %d ", calling_philosopher);
     printf("|\n");
+    
     sem_post(&print_status_lock);
 }
 
 void update_fork_representation(int philosopher_num) {
-    strcpy(philosophers[philosopher_num]->fork_representation, "-----");  // Reset all forks to '-'
 
-    int left_fork_idx = philosopher_id;
-    int right_fork_idx = (philosopher_id + 1) % NUM_PHILOSOPHERS;
+    int left_fork_idx = philosopher_num;
+    int right_fork_idx = (philosopher_num + 1) % NUM_PHILOSOPHERS;
 
     // If holding left fork
     if ((philosophers[philosopher_num]->left_fork)) {
-        philosophers[philosopher_num]->fork_representation[left_fork_idx] = '0' + philosopher_id;
+        philosophers[philosopher_num]->fork_representation[left_fork_idx] = 
+        '0' + philosopher_num;
+    }
+    else {
+        philosophers[philosopher_num]->fork_representation[left_fork_idx] = 
+        '-';
     }
     // If holding right fork
     if ((philosophers[philosopher_num]->right_fork)) {
-        philosophers[philosopher_num]->fork_representation[right_fork_idx] = '0' + philosopher_id;
+        philosophers[philosopher_num]->fork_representation[right_fork_idx] = 
+        '0' + ((philosopher_num + 1) % NUM_PHILOSOPHERS);
+    }
+    else {
+        philosophers[philosopher_num]->fork_representation[right_fork_idx] = 
+        '-';
     }
 }
 
 void dawdle() {
-/*
-* sleep for a random amount of time between 0 and 999
-* milliseconds. This routine is somewhat unreliable, since it
-* doesn’t take into account the possiblity that the nanosleep
-* could be interrupted for some legitimate reason.
-*
-* nanosleep() is part of the realtime library and must be linked
-* with –lrt
-*/
-struct timespec tv;
-int msec = (int)(((double)random() / RAND MAX) * 1000);
-tv.tv sec = 0;
-tv.tv nsec = 1000000 * msec;
-if ( −1 == nanosleep(&tv,NULL) ) {
-perror("nanosleep");
+    /*
+    * sleep for a random amount of time between 0 and 999
+    * milliseconds. This routine is somewhat unreliable, since it
+    * doesn’t take into account the possiblity that the nanosleep
+    * could be interrupted for some legitimate reason.
+    *
+    * nanosleep() is part of the realtime library and must be linked
+    * with –lrt
+    */
+    struct timespec tv;
+    int msec = (int)(((double)random() / RAND_MAX) * 1000);
+    tv.tv_sec = 0;
+    tv.tv_nsec = 1000000 * msec;
+    if (-1 == nanosleep(&tv,NULL) ) {
+    perror("nanosleep");
+    }
 }
+
+
+void print_header() {
+    int i;
+    for (i = 0; i < NUM_PHILOSOPHERS; i++) {
+        printf("| ============= ");
+    }
+    printf("|\n");
+
+    for (i = 0; i < NUM_PHILOSOPHERS; i++) {
+        printf("|       %c       ", 'A' + i);
+    }
+    printf("|\n");
+
+    for (i = 0; i < NUM_PHILOSOPHERS; i++) {
+        printf("| ============= ");
+    }
+    printf("|\n");
 }
+
