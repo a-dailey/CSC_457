@@ -91,9 +91,6 @@ PRIVATE void idle(void)
 	 */
 
 	/* start accounting for the idle time */
-	if (1) {
-		printf("@\b");
-	}
 	context_stop(proc_addr(KERNEL));
 	halt_cpu();
 	/*
